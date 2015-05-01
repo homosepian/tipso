@@ -16,11 +16,13 @@
       delay           : 200,
       animationIn     : '',
       animationOut    : '',
+      toggleAnimation : false,
       offsetX         : 0,
       offsetY         : 0,
       content         : null,
       ajaxContentUrl  : null,
       useTitle        : true,
+      interactive     : true,
       onBeforeShow    : null,
       onShow          : null,
       onHide          : null
@@ -46,20 +48,20 @@
       $e.addClass('tipso_style').removeAttr('title');
       if (isTouchSupported()) {
         $e.on('click' + '.' + pluginName, function(e) {
-          obj.mode == 'hide' ? obj.show() : obj.hide();
+          obj.mode == 'hide' ? obj.show(obj.settings.delay) : obj.hide(obj.settings.delay);
           e.stopPropagation();
         });
         $(document).on('click', function() {
           if (obj.mode == 'show') {
-            obj.hide();
+            obj.hide(obj.settings.delay);
           }
         });
       } else {
         $e.on('mouseover' + '.' + pluginName, function() {
-          obj.show();
+          obj.show(obj.settings.delay);
         });
         $e.on('mouseout' + '.' + pluginName, function() {
-          obj.hide();
+          obj.hide(obj.settings.delay);
         });
       }
     },
@@ -72,76 +74,25 @@
       return this.tipso_bubble;
     },
     show: function() {
-      var tipso_bubble = this.tooltip(),
-        obj = this,
-        $win = $(window);
-      if ($.isFunction(obj.settings.onBeforeShow)) {
-        obj.settings.onBeforeShow($(this));
-      }
-      tipso_bubble.css({
-        background: obj.settings.background,
-        color: obj.settings.color,
-        width: obj.settings.width
-      }).hide();
-      tipso_bubble.find('.tipso_content').html(obj.content());
-      reposition(obj);
-      $win.resize(function() {
-        reposition(obj);
-      });
-      obj.timeout = window.setTimeout(function() {
-        if (obj.ieFade || obj.settings.animationIn === '' || obj.settings.animationOut === ''){
-          tipso_bubble.appendTo('body').stop(true, true).fadeIn(obj.settings
-          .speed, function() {
-            obj.mode = 'show';
-            if ($.isFunction(obj.settings.onShow)) {
-              obj.settings.onShow($(this));
-            }
-          });
-        } else {
-          tipso_bubble.remove().appendTo('body')
-          .stop(true, true)
-          .removeClass('animated ' + obj.settings.animationOut)
-          .addClass('noAnimation')
-          .removeClass('noAnimation')
-          .addClass('animated ' + obj.settings.animationIn).fadeIn(obj.settings.speed, function() {
-            $(this).one('webkitAnimationEnd mozAnimationEnd MSAnimationEnd oanimationend animationend', function(){
-              $(this).removeClass('animated ' + obj.settings.animationIn);
-            });
-            obj.mode = 'show';
-            if ($.isFunction(obj.settings.onShow)) {
-              obj.settings.onShow($(this));
-            }
-          });
-        }
-      }, obj.settings.delay);
+		var tipso_bubble = this.tooltip(),
+		obj = this;
+		
+		// TO DO: why is show sometimes called when i move mouse down to hover tooltip?
+		if (obj.mode == 'show') {
+			console.log('Already showing');
+			return;
+		}
+
+		if ($.isFunction(obj.settings.onBeforeShow)) {
+			obj.settings.onBeforeShow($(this));
+		}
+		prepareTooltip(obj, tipso_bubble);
+
+		jQuery.doTimeout(pluginName, obj.settings.delay, function(){ animateShow($(this), obj, tipso_bubble) });
     },
     hide: function() {
-      var obj = this,
-        tipso_bubble = this.tooltip();
-      window.clearTimeout(obj.timeout);
-      obj.timeout = null;
-      if (obj.ieFade || obj.settings.animationIn === '' || obj.settings.animationOut === ''){
-        tipso_bubble.stop(true, true).fadeOut(obj.settings.speed,
-        function() {
-          $(this).remove();
-          if ($.isFunction(obj.settings.onHide) && obj.mode == 'show') {
-            obj.settings.onHide($(this));
-          }
-          obj.mode = 'hide';
-        });
-      } else {
-        tipso_bubble.stop(true, true)
-        .removeClass('animated ' + obj.settings.animationIn)
-        .addClass('noAnimation').removeClass('noAnimation')
-        .addClass('animated ' + obj.settings.animationOut)
-        .one('webkitAnimationEnd mozAnimationEnd MSAnimationEnd oanimationend animationend', function(){          
-          $(this).removeClass('animated ' + obj.settings.animationOut).remove();          
-          if ($.isFunction(obj.settings.onHide) && obj.mode == 'show') {
-            obj.settings.onHide($(this));
-          }
-          obj.mode = 'hide';
-        });
-      }
+		obj = this;
+		jQuery.doTimeout(pluginName, obj.settings.delay, function(){ animateHide(obj, obj.tooltip()) });
     },
     destroy: function() {
       var $e = this.element;
@@ -180,8 +131,97 @@
       }
     }
   });
+  
+	function prepareTooltip(obj, tipso_bubble) {
+		tipso_bubble.css({
+			background: obj.settings.background,
+			color: obj.settings.color,
+			width: obj.settings.width
+		}).hide();
+		tipso_bubble.find('.tipso_content').html(obj.content());
+		reposition(obj);
+		$(window).resize(function() {
+			reposition(obj);
+		});
+	}
 
-  function isTouchSupported() {
+	function interact(obj, tipso_bubble) {
+		if (obj.settings.interactive) {
+			tipso_bubble.hover( function () {
+				console.log('mouse entered');
+				// cancel the scheduled hiding.
+				jQuery.doTimeout(pluginName);
+				// if already animating - attempt to toggle the animation
+				if ($(this).is(':animated')) {
+					// TO DO: how do i make this work when animation isn't default?
+					// this still causes strange event-firing sequences with non-default animation.
+					animateShow($(this), obj, tipso_bubble);
+				}
+			}, function () {
+				console.log('mouse left');
+				jQuery.doTimeout(pluginName, obj.settings.delay, function(){ animateHide(obj, tipso_bubble) });
+			});
+		}
+	}
+	
+	function defaultAnimation(obj) {
+		return obj.ieFade || obj.settings.animationIn === '' || obj.settings.animationOut === '';
+	}
+
+	function animateShow(objProto, obj, tipso_bubble) {
+		var jumpToEnd = !obj.settings.toggleAnimation;
+		console.log('animate SHOW, will jump: ' + jumpToEnd);
+		if (defaultAnimation(obj)){
+			tipso_bubble.appendTo('body').stop(true, jumpToEnd).fadeIn(obj.settings.speed, tooltipShowing(obj, tipso_bubble));
+		} else {
+			tipso_bubble.remove().appendTo('body')
+			.stop(true, jumpToEnd)
+			.removeClass('animated ' + obj.settings.animationOut)
+			  .addClass('noAnimation')
+			  .removeClass('noAnimation')
+			  .addClass('animated ' + obj.settings.animationIn).fadeIn(obj.settings.speed, function() {
+					objProto.one('webkitAnimationEnd mozAnimationEnd MSAnimationEnd oanimationend animationend', function(){
+					objProto.removeClass('animated ' + obj.settings.animationIn);
+				});
+				tooltipShowing(obj, tipso_bubble);
+			});
+		}
+	}
+
+	function tooltipShowing(obj, tipso_bubble) {
+		obj.mode = 'show';
+		interact(obj, tipso_bubble);
+		if ($.isFunction(obj.settings.onShow)) {
+			obj.settings.onShow($(this));
+		}
+	}
+	
+	function animateHide(obj, tipso_bubble) {
+		var jumpToEnd = !obj.settings.toggleAnimation;
+		console.log('animate HIDE, will jump: ' + jumpToEnd);
+		if (defaultAnimation(obj)){
+			tipso_bubble.stop(true, jumpToEnd).fadeOut(obj.settings.speed, tooltipHidden($(this), obj));
+		} else {
+			tipso_bubble.stop(true, jumpToEnd)
+			.removeClass('animated ' + obj.settings.animationIn)
+			.addClass('noAnimation').removeClass('noAnimation')
+			.addClass('animated ' + obj.settings.animationOut)
+			.one('webkitAnimationEnd mozAnimationEnd MSAnimationEnd oanimationend animationend', function(){          
+			  $(this).removeClass('animated ' + obj.settings.animationOut);          
+			  tooltipHidden($(this), obj);
+			});
+		}
+	}
+	
+	function tooltipHidden(element, obj) {
+		element.remove();
+		if ($.isFunction(obj.settings.onHide) && obj.mode == 'show') {
+			obj.settings.onHide(element);
+		}
+		obj.mode = 'hide';
+	}
+	
+	function isTouchSupported() {
     var msTouchEnabled = window.navigator.msMaxTouchPoints;
     var generalTouchEnabled = "ontouchstart" in document.createElement(
       "div");
