@@ -39,6 +39,7 @@
     if ( !supportsTransitions ) {        
       this.ieFade = true;      
     }
+	this.uid = tipCounter++; // this._title; //
     this.init();
   }
   $.extend(Plugin.prototype, {
@@ -48,12 +49,12 @@
       $e.addClass('tipso_style').removeAttr('title');
       if (isTouchSupported()) {
         $e.on('click' + '.' + pluginName, function(e) {
-          obj.mode == 'hide' ? obj.show(obj.settings.delay) : obj.hide(obj.settings.delay);
+          obj.mode == 'hide' ? obj.show() : obj.hide();
           e.stopPropagation();
         });
         $(document).on('click', function() {
           if (obj.mode == 'show') {
-            obj.hide(obj.settings.delay);
+            obj.hide();
           }
         });
       } else {
@@ -70,6 +71,12 @@
         this.tipso_bubble = $(
           '<div class="tipso_bubble"><div class="tipso_content"></div><div class="tipso_arrow"></div></div>'
         );
+		this.tipso_bubble.find('.tipso_content').html(this.content());
+		$(window).resize(function() {
+			if (this.mode == 'show') {
+				reposition(this);
+			}
+		});
       }
       return this.tipso_bubble;
     },
@@ -77,22 +84,19 @@
 		var tipso_bubble = this.tooltip(),
 		obj = this;
 		
-		// TO DO: why is show sometimes called when i move mouse down to hover tooltip?
 		if (obj.mode == 'show') {
-			console.log('Already showing');
+			$.doTimeout(String(obj.uid));
 			return;
 		}
-
+		
 		if ($.isFunction(obj.settings.onBeforeShow)) {
 			obj.settings.onBeforeShow($(this));
 		}
-		prepareTooltip(obj, tipso_bubble);
-
-		jQuery.doTimeout(pluginName, obj.settings.delay, function(){ animateShow($(this), obj, tipso_bubble) });
+		prepareTooltip(this);
+		$.doTimeout(String(obj.uid), obj.settings.delay, function(){ animateShow(obj) });
     },
     hide: function() {
-		obj = this;
-		jQuery.doTimeout(pluginName, obj.settings.delay, function(){ animateHide(obj, obj.tooltip()) });
+		hideIfNotHidden(this);
     },
     destroy: function() {
       var $e = this.element;
@@ -131,35 +135,35 @@
       }
     }
   });
-  
-	function prepareTooltip(obj, tipso_bubble) {
+
+   var tipCounter = 0;
+   var showing = null;
+
+  function prepareTooltip(obj) {
+		tipso_bubble = obj.tooltip();
 		tipso_bubble.css({
+			background: '#BDB76B', // fall back to dark khaki. TO DO: method to convert rgba, hsl etc. to hex. Do in init!
 			background: obj.settings.background,
 			color: obj.settings.color,
-			width: obj.settings.width
-		}).hide();
-		tipso_bubble.find('.tipso_content').html(obj.content());
-		reposition(obj);
-		$(window).resize(function() {
-			reposition(obj);
+			width: obj.settings.width,
+			display: 'none'
 		});
+		reposition(obj);
 	}
 
 	function interact(obj, tipso_bubble) {
 		if (obj.settings.interactive) {
 			tipso_bubble.hover( function () {
-				console.log('mouse entered');
-				// cancel the scheduled hiding.
-				jQuery.doTimeout(pluginName);
+				// cancel any scheduled hiding.
+				$.doTimeout(String(obj.uid));
 				// if already animating - attempt to toggle the animation
 				if ($(this).is(':animated')) {
 					// TO DO: how do i make this work when animation isn't default?
 					// this still causes strange event-firing sequences with non-default animation.
-					animateShow($(this), obj, tipso_bubble);
+					animateShow(obj);
 				}
 			}, function () {
-				console.log('mouse left');
-				jQuery.doTimeout(pluginName, obj.settings.delay, function(){ animateHide(obj, tipso_bubble) });
+				hideIfNotHidden(obj);
 			});
 		}
 	}
@@ -168,9 +172,11 @@
 		return obj.ieFade || obj.settings.animationIn === '' || obj.settings.animationOut === '';
 	}
 
-	function animateShow(objProto, obj, tipso_bubble) {
+	function animateShow(obj) {
+		setShowing(obj);
+		tipso_bubble = obj.tooltip();
+		objProto = $(obj);
 		var jumpToEnd = !obj.settings.toggleAnimation;
-		console.log('animate SHOW, will jump: ' + jumpToEnd);
 		if (defaultAnimation(obj)){
 			tipso_bubble.appendTo('body').stop(true, jumpToEnd).fadeIn(obj.settings.speed, tooltipShowing(obj, tipso_bubble));
 		} else {
@@ -192,15 +198,23 @@
 		obj.mode = 'show';
 		interact(obj, tipso_bubble);
 		if ($.isFunction(obj.settings.onShow)) {
-			obj.settings.onShow($(this));
+			obj.settings.onShow($(obj));
 		}
 	}
 	
-	function animateHide(obj, tipso_bubble) {
+	function hideIfNotHidden(obj) {
+		if (obj.mode == 'hide') {
+			$.doTimeout(String(obj.uid));
+			return;
+		}
+		$.doTimeout(String(obj.uid), obj.settings.delay, function(){ animateHide(obj) });
+	}
+	
+	function animateHide(obj) {
+		tipso_bubble = obj.tooltip();
 		var jumpToEnd = !obj.settings.toggleAnimation;
-		console.log('animate HIDE, will jump: ' + jumpToEnd);
 		if (defaultAnimation(obj)){
-			tipso_bubble.stop(true, jumpToEnd).fadeOut(obj.settings.speed, tooltipHidden($(this), obj));
+			tipso_bubble.stop(true, jumpToEnd).fadeOut(obj.settings.speed, tooltipHidden(obj));
 		} else {
 			tipso_bubble.stop(true, jumpToEnd)
 			.removeClass('animated ' + obj.settings.animationIn)
@@ -208,17 +222,31 @@
 			.addClass('animated ' + obj.settings.animationOut)
 			.one('webkitAnimationEnd mozAnimationEnd MSAnimationEnd oanimationend animationend', function(){          
 			  $(this).removeClass('animated ' + obj.settings.animationOut);          
-			  tooltipHidden($(this), obj);
+			  tooltipHidden(obj);
 			});
 		}
 	}
 	
-	function tooltipHidden(element, obj) {
-		element.remove();
+	function tooltipHidden(obj) {
+		tipso_bubble = obj.tooltip();
+		tipso_bubble.remove();
 		if ($.isFunction(obj.settings.onHide) && obj.mode == 'show') {
-			obj.settings.onHide(element);
+			obj.settings.onHide(tipso_bubble);
 		}
 		obj.mode = 'hide';
+		if (showing === obj) {
+			showing = null;
+		} else if (showing) {
+			console.log('WARNING: showing tooltip ' + showing.uid + ' is not the currently hiding one (' + obj.uid + ')');
+		}
+	}
+	
+	function setShowing(obj) {
+		if (showing) {
+			showing.hide();
+			tooltipHidden(showing);
+		}
+		showing = obj;
 	}
 	
 	function isTouchSupported() {
